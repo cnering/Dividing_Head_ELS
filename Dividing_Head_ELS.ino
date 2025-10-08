@@ -4,6 +4,10 @@
 #include <U8g2lib.h>
 #include "Button2.h"
 #include "state.h"
+#include <Preferences.h>
+
+
+Preferences prefs;
 
 AppState STATE;
 
@@ -49,34 +53,23 @@ void right_arrow_tap(Button2& btn) {
   divisions_current_place--;
 }
 void up_arrow_tap(Button2& btn) {
-  switch(divisions_current_place){
-    case 1:
-      STATE.simple.num_divisions_ones++;
-      break;
-    case 2:
-      STATE.simple.num_divisions_tens++;
-      break;
-    case 3:
-      STATE.simple.num_divisions_hundreds++;
-      break;
+  switch (STATE.mode){
+    case BACKLASH_ADJUST: changeBacklash(1); break;
+    case SIMPLE:          changeSimpleDigit(1);  break;
   }
-  STATE.simple.num_divisions = 100 * STATE.simple.num_divisions_hundreds + 10 * STATE.simple.num_divisions_tens + STATE.simple.num_divisions_ones;
 }
 void down_arrow_tap(Button2& btn) {
-  switch(divisions_current_place){
-    case 1:
-      STATE.simple.num_divisions_ones--;
-      break;
-    case 2:
-      STATE.simple.num_divisions_tens--;
-      break;
-    case 3:
-      STATE.simple.num_divisions_hundreds--;
-      break;
+  switch (STATE.mode){
+    case BACKLASH_ADJUST: changeBacklash(-1); break;
+    case SIMPLE:          changeSimpleDigit(-1); break;
   }
-  STATE.simple.num_divisions = 100 * STATE.simple.num_divisions_hundreds + 10 * STATE.simple.num_divisions_tens + STATE.simple.num_divisions_ones;
 }
+
 void center_arrow_tap(Button2& btn) {
+  switch (STATE.mode){
+    case BACKLASH_ADJUST: acceptBacklash(); break;
+    case SIMPLE:          return; break;
+  }
 }
 void cancel_tap(Button2& btn) {
   STATE.common.rotation_started = false;
@@ -84,13 +77,15 @@ void cancel_tap(Button2& btn) {
   STATE.simple.current_run_step = 0;
 }
 void mode_tap(Button2& btn) {
-  Serial.println("mode");
+  STATE.mode = static_cast<Mode>((STATE.mode + 1) % MODE_COUNT);
 }
 void ok_tap(Button2& btn) {
   showNewNumber();
 }
 
 void setup() {
+
+  STATE.backlash.backlash_steps = prefs.getInt("backlash_steps", 0);
 
   button_up_arrow.begin(BUTTON_UP_ARROW);
   button_up_arrow.setTapHandler(up_arrow_tap);
@@ -158,8 +153,20 @@ void loop() {
   button_ok.loop();
   button_cancel.loop();
 
-  displaySimpleDivisions();
+  displayCurrentModePage();
 
+}
+
+void displayCurrentModePage(){
+  switch (STATE.mode){
+    case BACKLASH_ADJUST:
+      displayBacklashAdjust();
+      break;
+    case SIMPLE:
+      displaySimpleDivisions();
+      break;
+  }
+  
 }
 
 void displaySimpleDivisions(){
@@ -168,9 +175,9 @@ void displaySimpleDivisions(){
 
   // pick your X offset (here 0) and Y positions for each line
 
-  String version = "# of Divisions";
+  String header = "# of Divisions";
 
-  u8g2.drawStr(0, 10, version.c_str());
+  u8g2.drawStr(0, 10, header.c_str());
 
   //u8g2.drawStr(0, 25, String(num_divisions).c_str());
   u8g2.drawStr(0, 25, (String(STATE.simple.num_divisions_hundreds) + String(STATE.simple.num_divisions_tens) + String(STATE.simple.num_divisions_ones)).c_str());
@@ -179,8 +186,21 @@ void displaySimpleDivisions(){
 
   u8g2.drawStr(0, 50, (String(STATE.simple.current_run_step) + "/" + String(STATE.simple.num_divisions)).c_str());
 
-  
+  u8g2.sendBuffer();
+}
 
+void displayBacklashAdjust(){
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+
+  // pick your X offset (here 0) and Y positions for each line
+
+  String header = "Backlash Adjust";
+
+  u8g2.drawStr(0, 10, header.c_str());
+
+  
+  u8g2.drawStr(0, 25, String(STATE.backlash.backlash_steps).c_str());
 
   u8g2.sendBuffer();
 }
@@ -202,3 +222,27 @@ void showNewNumber() {
 void remove_backlash(){
   stepper->move(BACKLASH_STEPS);
 }
+
+void changeBacklash(int change){
+  STATE.backlash.backlash_steps+= change;
+}
+
+void acceptBacklash(){
+  prefs.putInt("backlash_steps", STATE.backlash.backlash_steps);
+}
+
+void changeSimpleDigit(int change){
+    switch(divisions_current_place){
+    case 1:
+      STATE.simple.num_divisions_ones+= change;
+      break;
+    case 2:
+      STATE.simple.num_divisions_tens+= change;
+      break;
+    case 3:
+      STATE.simple.num_divisions_hundreds+= change;
+      break;
+  }
+  STATE.simple.num_divisions = 100 * STATE.simple.num_divisions_hundreds + 10 * STATE.simple.num_divisions_tens + STATE.simple.num_divisions_ones;
+}
+

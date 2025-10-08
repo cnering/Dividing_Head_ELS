@@ -20,3 +20,6 @@
 #define BUTTON_MODE 34 /*39*/
 #define BUTTON_OK 36
 #define BUTTON_CANCEL 39 /*34*/
+
+
+#define MODE_COUNT 3
