@@ -7,6 +7,10 @@
 #include <Preferences.h>
 #include <ESP32Encoder.h>
 
+boolean test_encoder = false;
+
+uint64_t last_encoder_counts = 0;
+
 Preferences prefs;
 
 AppState STATE;
@@ -23,25 +27,27 @@ void left_arrow_tap(Button2& btn) {
   switch (STATE.mode){
     case SIMPLE:          STATE.simple.divisions_current_place++;  break;
   }
-  simulate_mill_left();
+  test_encoder = false;
   
 }
 void right_arrow_tap(Button2& btn) {
   switch (STATE.mode){
     case SIMPLE:          STATE.simple.divisions_current_place--;  break;
   }
-  simulate_mill_right();
+  test_encoder = true;
 }
 void up_arrow_tap(Button2& btn) {
   switch (STATE.mode){
     case BACKLASH_ADJUST: changeBacklash(1); break;
-    case SIMPLE:          changeSimpleDigit(1);  break;
+    case SIMPLE:          changeDigit(1,SIMPLE);  break;
+    case ROTARY_TABLE:    changeDigit(1,ROTARY_TABLE); break;
   }
 }
 void down_arrow_tap(Button2& btn) {
   switch (STATE.mode){
     case BACKLASH_ADJUST: changeBacklash(-1); break;
-    case SIMPLE:          changeSimpleDigit(-1); break;
+    case SIMPLE:          changeDigit(-1,SIMPLE); break;
+    case ROTARY_TABLE:    changeDigit(-1,ROTARY_TABLE); break;
   }
 }
 
@@ -49,21 +55,33 @@ void center_arrow_tap(Button2& btn) {
   switch (STATE.mode){
     case BACKLASH_ADJUST: acceptBacklash(); break;
     case SIMPLE:          return; break;
+    case ROTARY_TABLE:    rotaryChangeMode(); break;
   }
 }
 void cancel_tap(Button2& btn) {
-  STATE.common.rotation_started = false;
-  STATE.simple.num_divisions = 0;
-  STATE.simple.current_run_step = 0;
+  switch (STATE.mode){
+    case SIMPLE:            cancel_simple(); break;
+  }
 }
 void mode_tap(Button2& btn) {
   STATE.mode = static_cast<Mode>((STATE.mode + 1) % MODE_COUNT);
 }
 void ok_tap(Button2& btn) {
-  showNewNumber();
+  switch (STATE.mode){
+    case SIMPLE:          advanceIndex(SIMPLE); break;
+    case ROTARY_TABLE:          advanceIndex(ROTARY_TABLE); break;
+  }
 }
 
+void cancel_simple(){
+  STATE.common.rotation_started = false; 
+  STATE.simple.current_run_step = 0;
+}
 
+volatile int32_t sim_speed = 20;    // counts per update
+int32_t max_speed = 500;           // max counts per update (adjust to taste)
+unsigned long lastSpeedChange = 0;
+unsigned long speedChangeInterval = 500; // ms
 
 void setup() {
 
@@ -153,7 +171,51 @@ void loop() {
   button_cancel.loop();
 
   displayCurrentModePage();
+  encoderTester();
 
+}
+
+void encoderTester(){
+  uint64_t cur_steps = encoder.getCount();
+  Serial.println(cur_steps);
+  if(last_encoder_counts != cur_steps){
+    stepper->move(cur_steps - last_encoder_counts);
+    last_encoder_counts = cur_steps;
+  }
+}
+
+void simulateManualMotion(void *param) {
+  bool direction = true;  // true = forward, false = backward
+
+  while (true) {
+    //Serial.println("hello");
+    if(test_encoder){
+      unsigned long now = millis();
+
+      // Occasionally change speed and direction
+      if (now - lastSpeedChange > speedChangeInterval) {
+        lastSpeedChange = now;
+        // Random new speed (human-like, slower more often)
+        sim_speed = random(0, max_speed);
+        // Occasionally go backwards
+        if (random(0, 100) < 20) direction = !direction;
+        // Occasionally STOP completely
+        if (random(0, 100) < 10) sim_speed = 0;
+      }
+
+      // Apply motion
+      int32_t current = encoder.getCount();
+      if (direction)
+        current += sim_speed;
+      else
+        current -= sim_speed;
+      
+      encoder.setCount(current);
+
+      // Update rate controls smoothness
+    }
+    vTaskDelay(pdMS_TO_TICKS(20)); // 50 Hz updates
+  }
 }
 
 void displayCurrentModePage(){
@@ -166,8 +228,65 @@ void displayCurrentModePage(){
       break;
     case ENCODER_TEST:
       displayEncoderTest();
+      break;
+    case ROTARY_TABLE:
+      displayRotaryTable();
+      break;
   }
   
+}
+
+void displayRotaryTable(){
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+
+  // pick your X offset (here 0) and Y positions for each line
+
+  String header = "Rotary Table";
+
+  u8g2.drawStr(0, 10, header.c_str());
+
+  //u8g2.drawStr(0, 25, String(num_divisions).c_str());
+
+  u8g2.setFont(u8g2_font_profont10_mf);
+
+  String instructions = "Degrees:";
+
+  u8g2.drawStr(0, 25, instructions.c_str());
+
+  String formatted_degrees = "";
+
+  String moveSign = "+";
+  if(STATE.rotary.num_degrees < 0){
+    moveSign = "-";
+  }
+
+  int absDegrees = abs(STATE.rotary.num_degrees);
+
+  if(absDegrees < 10){
+    formatted_degrees = moveSign + "00" + String(absDegrees);
+  } else if(abs(STATE.rotary.num_degrees) < 100){
+    formatted_degrees = moveSign + "0" + String(absDegrees);
+  } else{
+    formatted_degrees = moveSign + String(absDegrees);
+  }
+  u8g2.drawStr(0, 35, formatted_degrees.c_str());
+  
+  //u8g2.drawStr(5 * (3 - STATE.rotary.degrees_current_place) ,42 , "_");
+  u8g2.drawHLine(5 * (4 - STATE.rotary.degrees_current_place) ,37 , 4);
+
+  String status = "Speed";
+
+
+  u8g2.drawStr(60, 25, String(status).c_str());
+
+  u8g2.drawStr(60, 35, (String(STATE.rotary.current_speed_IPM)  + " IPM").c_str());
+  
+  if(STATE.rotary.finished_move){
+    u8g2.drawStr(0, 60, String("Indexing Finished!").c_str());
+  }
+
+  u8g2.sendBuffer();
 }
 
 void displayEncoderTest(){
@@ -189,16 +308,41 @@ void displaySimpleDivisions(){
 
   // pick your X offset (here 0) and Y positions for each line
 
-  String header = "# of Divisions";
+  String header = "Simple Indexing";
 
   u8g2.drawStr(0, 10, header.c_str());
 
   //u8g2.drawStr(0, 25, String(num_divisions).c_str());
-  u8g2.drawStr(0, 25, (String(STATE.simple.num_divisions_hundreds) + String(STATE.simple.num_divisions_tens) + String(STATE.simple.num_divisions_ones)).c_str());
-  
-  u8g2.drawStr(5 * (3 - STATE.simple.divisions_current_place) ,27 , "_");
 
-  u8g2.drawStr(0, 50, (String(STATE.simple.current_run_step) + "/" + String(STATE.simple.num_divisions)).c_str());
+  u8g2.setFont(u8g2_font_profont10_mf);
+
+  String instructions = "# Divs:";
+
+  u8g2.drawStr(0, 25, instructions.c_str());
+
+  String formatted_divisions = "";
+
+  if(STATE.simple.num_divisions < 10){
+    formatted_divisions = "00" + String(STATE.simple.num_divisions);
+  } else if(STATE.simple.num_divisions < 100){
+    formatted_divisions = "0" + String(STATE.simple.num_divisions);
+  } else{
+    formatted_divisions = String(STATE.simple.num_divisions);
+  }
+  u8g2.drawStr(0, 35, formatted_divisions.c_str());
+  
+  //u8g2.drawStr(5 * (3 - STATE.simple.divisions_current_place) ,42 , "_");
+  u8g2.drawHLine(5 * (3 - STATE.simple.divisions_current_place) ,37 , 4);
+
+  String status = "Cur Step:";
+
+  u8g2.drawStr(60, 25, String(status).c_str());
+
+  u8g2.drawStr(60, 35, (String(STATE.simple.current_run_step) + "/" + String(STATE.simple.num_divisions)).c_str());
+  
+  if(STATE.simple.finished_move){
+    u8g2.drawStr(0, 60, String("Indexing Finished!").c_str());
+  }
 
   u8g2.sendBuffer();
 }
@@ -219,18 +363,23 @@ void displayBacklashAdjust(){
   u8g2.sendBuffer();
 }
 
-void showNewNumber() {
-  if(!STATE.common.rotation_started){
-    remove_backlash();
-    STATE.common.rotation_started = true;
+void advanceIndex(int enumValue) {
+  if(enumValue == SIMPLE){
+    if(!STATE.common.rotation_started){
+      remove_backlash();
+      STATE.common.rotation_started = true;
+    }
+    if(STATE.simple.current_run_step < STATE.simple.num_divisions){
+      STATE.simple.current_run_step++;
+      long steps_to_move = ((1.0/STATE.simple.num_divisions) * 40.0)*10000.0;
+      stepper->move(steps_to_move);
+    }
+    if(STATE.simple.current_run_step == STATE.simple.num_divisions){
+      STATE.simple.finished_move = true;
+    }
+  } else if(enumValue == ROTARY_TABLE){
+
   }
-  Serial.println(STATE.simple.num_divisions);
-  Serial.println(1.0/STATE.simple.num_divisions);
-  long steps_to_move = ((1.0/STATE.simple.num_divisions) * 40.0)*10000.0;
-  Serial.print("moving steps ");
-  Serial.println(steps_to_move);
-  stepper->move(steps_to_move);
-  STATE.simple.current_run_step++;
 }
 
 void remove_backlash(){
@@ -248,41 +397,51 @@ void acceptBacklash(){
   prefs.end();
 }
 
-void changeSimpleDigit(int change){
-    switch(STATE.simple.divisions_current_place){
-    case 1:
-      STATE.simple.num_divisions_ones+= change;
-      break;
-    case 2:
-      STATE.simple.num_divisions_tens+= change;
-      break;
-    case 3:
-      STATE.simple.num_divisions_hundreds+= change;
-      break;
-  }
-  STATE.simple.num_divisions = 100 * STATE.simple.num_divisions_hundreds + 10 * STATE.simple.num_divisions_tens + STATE.simple.num_divisions_ones;
-}
-
-unsigned long microtime = 0;
-int inches_to_move = 3;
-int seconds_to_move = 3;
-int time_skip = 1000;
-
-void simulate_mill_left(){
-  for(int i = 0; i < seconds_to_move * 3000000; i+= time_skip){
-    if (micros() - microtime > time_skip){
-      microtime = micros();
-      encoder.setCount(encoder.getCount() + 25);
+void changeDigit(int change, int enumItem){
+  if(enumItem == SIMPLE){
+    STATE.simple.finished_move = false;
+    STATE.simple.current_run_step = 0;
+    if((100 * STATE.simple.num_divisions_hundreds + 10 * STATE.simple.num_divisions_tens + STATE.simple.num_divisions_ones) + change > 0){
+        switch(STATE.simple.divisions_current_place){
+          case 1:
+            STATE.simple.num_divisions_ones+= change;
+            break;
+          case 2:
+            STATE.simple.num_divisions_tens+= change;
+            break;
+          case 3:
+            STATE.simple.num_divisions_hundreds+= change;
+            break;
+        }
+      STATE.simple.num_divisions = max(100 * STATE.simple.num_divisions_hundreds + 10 * STATE.simple.num_divisions_tens + STATE.simple.num_divisions_ones,1);
+    }
+  } else if(enumItem == ROTARY_TABLE){
+    if(STATE.rotary.current_adjust_mode == RotaryTable::ROTARY_DEGREES){
+      STATE.rotary.finished_move = false;
+          switch(STATE.rotary.degrees_current_place){
+            case 1:
+              STATE.rotary.num_degrees_ones+= change;
+              break;
+            case 2:
+              STATE.rotary.num_degrees_tens+= change;
+              break;
+            case 3:
+              STATE.rotary.num_degrees_hundreds+= change;
+              break;
+          }
+        STATE.rotary.num_degrees = 100 * STATE.rotary.num_degrees_hundreds + 10 * STATE.rotary.num_degrees_tens + STATE.rotary.num_degrees_ones;
+    } else{
+      Serial.println("hmm");
+      STATE.rotary.current_speed_IPM += change;
     }
   }
 }
-
-void simulate_mill_right(){
-  if (micros() - microtime > time_skip){
-    microtime = micros();
-    encoder.setCount(encoder.getCount() + 25);
+void rotaryChangeMode(){
+  Serial.println(STATE.rotary.current_adjust_mode);
+  if(STATE.rotary.current_adjust_mode == RotaryTable::ROTARY_DEGREES){
+    STATE.rotary.current_adjust_mode = RotaryTable::ROTARY_SPEED;
+  } else{
+    STATE.rotary.current_adjust_mode = RotaryTable::ROTARY_DEGREES;
   }
 }
-
-
 
