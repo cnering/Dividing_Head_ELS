@@ -5,52 +5,32 @@
 #include "Button2.h"
 #include "state.h"
 #include <Preferences.h>
-
+#include <ESP32Encoder.h>
 
 Preferences prefs;
 
 AppState STATE;
 
+ESP32Encoder encoder;
 FastAccelStepperEngine engine = FastAccelStepperEngine();
 FastAccelStepper *stepper = NULL;
-
-const byte numChars = 32;
-char receivedChars[numChars];   // an array to store the received data
-
-boolean newData = false;
-
-int dataNumber = 0;             // new for this version
-
-int current_divisions = 1;
-
-
-
-/*GLOBALS TRACKING PROGRESS*/
-
-/*
-boolean rotation_started = false;
-int num_divisions = 0;
-int num_divisions_ones = 0;
-int num_divisions_tens = 0;
-int num_divisions_hundreds = 0;
-*/
-int divisions_current_place = 1;
-
-int current_run_step = 0;
-
-
-
-boolean continue_run = false;
 
 U8G2_SSD1309_128X64_NONAME2_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
 Button2 button_up_arrow, button_down_arrow, button_left_arrow, button_right_arrow, button_center_arrow, button_mode, button_ok, button_cancel;
 
 void left_arrow_tap(Button2& btn) {
-  divisions_current_place++;
+  switch (STATE.mode){
+    case SIMPLE:          STATE.simple.divisions_current_place++;  break;
+  }
+  simulate_mill_left();
+  
 }
 void right_arrow_tap(Button2& btn) {
-  divisions_current_place--;
+  switch (STATE.mode){
+    case SIMPLE:          STATE.simple.divisions_current_place--;  break;
+  }
+  simulate_mill_right();
 }
 void up_arrow_tap(Button2& btn) {
   switch (STATE.mode){
@@ -83,9 +63,12 @@ void ok_tap(Button2& btn) {
   showNewNumber();
 }
 
+
+
 void setup() {
 
-  STATE.backlash.backlash_steps = prefs.getInt("backlash_steps", 0);
+  prefs.begin("backlash_steps", false);
+  STATE.backlash.backlash_steps = prefs.getInt("backlash_steps", 5);
 
   button_up_arrow.begin(BUTTON_UP_ARROW);
   button_up_arrow.setTapHandler(up_arrow_tap);
@@ -113,6 +96,18 @@ void setup() {
 
   Serial.begin(115200);
 
+  encoder.attachFullQuad(ENCODER_PIN_A, ENCODER_PIN_B);
+
+    // Give PCNT a modest glitch filter (APB clock cycles). Tune 100–1000.
+  
+
+  // Ensure HW limits & software accumulator are initialized
+  encoder.clearCount();
+  encoder.setCount(500);
+  encoder.resumeCount();
+
+  
+
   /*!!!STEPPER DRIVER!!!*/
   engine.init();
   stepper = engine.stepperConnectToPin(STEPPER_STEP_PIN,DRIVER_RMT);
@@ -134,6 +129,10 @@ void setup() {
 
   /*DISPLAY*/
   u8g2.begin();
+
+  xTaskCreatePinnedToCore(
+    simulateManualMotion, "simMotion", 4096, NULL, 1, NULL, 1
+  );
 
 }
 
@@ -165,8 +164,23 @@ void displayCurrentModePage(){
     case SIMPLE:
       displaySimpleDivisions();
       break;
+    case ENCODER_TEST:
+      displayEncoderTest();
   }
   
+}
+
+void displayEncoderTest(){
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+
+  int64_t cur_count = encoder.getCount();
+
+  u8g2.drawStr(0, 10, String((int)cur_count).c_str());
+
+  u8g2.sendBuffer();
+  Serial.println(cur_count);
+
 }
 
 void displaySimpleDivisions(){
@@ -182,7 +196,7 @@ void displaySimpleDivisions(){
   //u8g2.drawStr(0, 25, String(num_divisions).c_str());
   u8g2.drawStr(0, 25, (String(STATE.simple.num_divisions_hundreds) + String(STATE.simple.num_divisions_tens) + String(STATE.simple.num_divisions_ones)).c_str());
   
-  u8g2.drawStr(5 * (3 - divisions_current_place) ,27 , "_");
+  u8g2.drawStr(5 * (3 - STATE.simple.divisions_current_place) ,27 , "_");
 
   u8g2.drawStr(0, 50, (String(STATE.simple.current_run_step) + "/" + String(STATE.simple.num_divisions)).c_str());
 
@@ -220,19 +234,22 @@ void showNewNumber() {
 }
 
 void remove_backlash(){
-  stepper->move(BACKLASH_STEPS);
+  stepper->move(STATE.backlash.backlash_steps);
 }
 
 void changeBacklash(int change){
   STATE.backlash.backlash_steps+= change;
+  stepper->move(change);
 }
 
 void acceptBacklash(){
+  prefs.begin("backlash_steps", false);
   prefs.putInt("backlash_steps", STATE.backlash.backlash_steps);
+  prefs.end();
 }
 
 void changeSimpleDigit(int change){
-    switch(divisions_current_place){
+    switch(STATE.simple.divisions_current_place){
     case 1:
       STATE.simple.num_divisions_ones+= change;
       break;
@@ -245,4 +262,27 @@ void changeSimpleDigit(int change){
   }
   STATE.simple.num_divisions = 100 * STATE.simple.num_divisions_hundreds + 10 * STATE.simple.num_divisions_tens + STATE.simple.num_divisions_ones;
 }
+
+unsigned long microtime = 0;
+int inches_to_move = 3;
+int seconds_to_move = 3;
+int time_skip = 1000;
+
+void simulate_mill_left(){
+  for(int i = 0; i < seconds_to_move * 3000000; i+= time_skip){
+    if (micros() - microtime > time_skip){
+      microtime = micros();
+      encoder.setCount(encoder.getCount() + 25);
+    }
+  }
+}
+
+void simulate_mill_right(){
+  if (micros() - microtime > time_skip){
+    microtime = micros();
+    encoder.setCount(encoder.getCount() + 25);
+  }
+}
+
+
 

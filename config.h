@@ -22,4 +22,7 @@
 #define BUTTON_CANCEL 39 /*34*/
 
 
-#define MODE_COUNT 3
+#define MODE_COUNT 5
+
+#define ENCODER_PIN_A 32
+#define ENCODER_PIN_B 33

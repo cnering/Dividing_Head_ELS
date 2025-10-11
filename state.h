@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-enum Mode : uint8_t { SIMPLE, BACKLASH_ADJUST, HELICAL };
+enum Mode : uint8_t { SIMPLE, ROTARY_TABLE, BACKLASH_ADJUST, HELICAL, ENCODER_TEST };
 
 struct Common { 
   boolean rotation_started = false; 
@@ -11,6 +11,7 @@ struct SimpleState {
   int num_divisions_ones = 0;
   int num_divisions_tens = 0;
   int num_divisions_hundreds = 0;
+  int divisions_current_place = 1;
   int current_run_step = 0;
 };
 struct BacklashAdjust { 
