@@ -23,6 +23,7 @@ U8G2_SSD1309_128X64_NONAME2_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
 Button2 button_up_arrow, button_down_arrow, button_left_arrow, button_right_arrow, button_center_arrow, button_mode, button_ok, button_cancel;
 
+void move_auto_backlash(int steps, boolean override_backlash = false, boolean override_speed = false, int speed_in_steps_per_second = 1000 );
 
 
 volatile int32_t sim_speed = 20;    // counts per update
@@ -108,7 +109,7 @@ int dir = 1;
 void loop() {
   executeButtonLoops();
   displayCurrentModePage();
-  encoderTester();
+  //encoderTester();
 }
 
 void cancel_simple(){
@@ -120,7 +121,7 @@ void encoderTester(){
   uint64_t cur_steps = encoder.getCount();
   //Serial.println(cur_steps);
   if(last_encoder_counts != cur_steps){
-    stepper->move(cur_steps - last_encoder_counts);
+    move_auto_backlash(cur_steps - last_encoder_counts);
     last_encoder_counts = cur_steps;
   }
 }
@@ -158,30 +159,15 @@ void simulateManualMotion(void *param) {
     vTaskDelay(pdMS_TO_TICKS(20)); // 50 Hz updates
   }
 }
-
-void displayEncoderTest(){
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB08_tr);
-
-  int64_t cur_count = encoder.getCount();
-
-  u8g2.drawStr(0, 10, String((int)cur_count).c_str());
-
-  u8g2.sendBuffer();
-  Serial.println(cur_count);
-
-}
-
 void advanceIndex(int enumValue) {
   if(enumValue == SIMPLE){
     if(!STATE.common.rotation_started){
-      remove_backlash();
       STATE.common.rotation_started = true;
     }
     if(STATE.simple.current_run_step < STATE.simple.num_divisions){
       STATE.simple.current_run_step++;
       long steps_to_move = ((1.0/STATE.simple.num_divisions) * 40.0)*10000.0;
-      stepper->move(steps_to_move);
+      move_auto_backlash(steps_to_move);
     }
     if(STATE.simple.current_run_step == STATE.simple.num_divisions){
       STATE.simple.finished_move = true;
@@ -196,11 +182,11 @@ void advanceIndex(int enumValue) {
     switch(STATE.rotary.current_start_mode){
       case  RotaryTable::CNTR:
         if(STATE.rotary.initial_move){
-          stepper->move((total_steps_to_move/2) * STATE.rotary.rotary_direction);
+          move_auto_backlash((total_steps_to_move/2) * STATE.rotary.rotary_direction,false, true, calculated_speed_steps_per_second);
           STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
           STATE.rotary.initial_move = false;
         } else{
-          stepper->move((total_steps_to_move) * STATE.rotary.rotary_direction);
+          move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction);
           STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
         }
       break;
@@ -209,7 +195,7 @@ void advanceIndex(int enumValue) {
           STATE.rotary.rotary_direction = -1;
           STATE.rotary.initial_move = false;
         }
-        stepper->move((total_steps_to_move) * STATE.rotary.rotary_direction);
+        move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction);
         STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
       break;
       case RotaryTable::CCW:
@@ -217,19 +203,88 @@ void advanceIndex(int enumValue) {
           STATE.rotary.rotary_direction = 1;
           STATE.rotary.initial_move = false;
         }
-        stepper->move((total_steps_to_move) * STATE.rotary.rotary_direction);
+        move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction);
         STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
     }
   }
 }
 
-void remove_backlash(){
-  stepper->move(STATE.backlash.backlash_steps);
+void move_auto_backlash(int steps, boolean override_backlash, boolean override_speed, int speed_in_steps_per_second){
+  /*first move ever, always apply backlash*/
+  double final_move_amount = steps;
+  double final_backlash_amount = 0;
+
+  Serial.print("Commanded Steps: ");
+  Serial.println(steps);
+
+  if(!override_backlash){
+    final_backlash_amount = STATE.backlash.backlash_steps;
+  }
+
+  switch(STATE.backlash.last_step_direction){
+    case 0:
+    /*we haven't moved yet, compensate for backlash in whatever direction we're commanded to move*/
+      /*positive move, add backlash*/
+      Serial.println("First move, always backlash");
+      if(steps >= 0){
+        final_move_amount = final_move_amount + final_backlash_amount;
+        Serial.println("Setting direction to POSITIVE");
+        STATE.backlash.last_step_direction = 1;
+      /*negative move, subtract backlash*/
+      } else{
+        final_move_amount = final_move_amount - final_backlash_amount;
+        Serial.println("Setting direction to NEGATIVE");
+        STATE.backlash.last_step_direction = -1;
+      }
+      break;
+    case 1:
+    /*we've already moved once, decide if we need to compensate for backlash in the FORWARD direction*/
+    Serial.println("last move was POSITIVE");
+    if(steps >= 0){
+      /*we are travelling in the SAME direction, so no need to apply backlash*/
+      Serial.println("Travelling same POSITIVE");
+      final_move_amount = final_move_amount;
+      STATE.backlash.last_step_direction = 1;
+    } else{
+      /*we have changed directions, apply backlash before moving*/
+      Serial.println("POSITIVE TO NEGATIVE");
+      final_move_amount = final_move_amount - final_backlash_amount;
+      STATE.backlash.last_step_direction = -1;
+    }
+    break;
+    case -1:
+    Serial.println("last move was NEGATIVE");
+    /*we've already moved once, decide if we need to compensate for backlash in the REVERSE direction*/
+    if(steps <= 0){
+      /*we are travelling in the SAME direction, so no need to apply backlash*/
+      Serial.println("Travelling same NEGATIVE");
+      final_move_amount = final_move_amount;
+      STATE.backlash.last_step_direction = -1;
+    } else{
+      /*we have changed directions, apply backlash before moving*/
+      Serial.println("NEGATIVE to POSITIVE");
+      final_move_amount = final_move_amount + final_backlash_amount;
+      STATE.backlash.last_step_direction = 1;
+    }
+    break;
+  }
+
+  if(override_speed){ 
+    stepper->setAcceleration(ACCELERATION);
+    stepper->setSpeedInHz(speed_in_steps_per_second);
+  }
+  Serial.println(final_move_amount);
+  stepper->move(final_move_amount);
+  
+  /*Reset speed to defaults*/
+  stepper->setAcceleration(ACCELERATION);
+  stepper->setSpeedInHz(SPEED_IN_HZ);
+
 }
 
 void changeBacklash(int change){
   STATE.backlash.backlash_steps+= change;
-  stepper->move(change);
+  move_auto_backlash(change);
 }
 
 void acceptBacklash(){
@@ -275,6 +330,16 @@ void changeDigit(int change, int enumItem){
       STATE.rotary.current_speed_degrees_per_second += change;
     } else if(STATE.rotary.current_adjust_mode == RotaryTable::ROTARY_MODE){
       STATE.rotary.current_start_mode = static_cast<RotaryTable::rotary_start_mode>((STATE.rotary.current_start_mode + 1*change) % 3);
+    }
+  } else if (enumItem == HELICAL){
+    if(STATE.helical.current_helical_mode == HelicalGears::HELICAL_UNITS){
+      STATE.helical.metric = !STATE.helical.metric;
+    } else if(STATE.helical.current_helical_mode == HelicalGears::HELICAL_TEETH){
+      STATE.helical.teeth += change;
+    } else if(STATE.helical.current_helical_mode == HelicalGears::HELICAL_DPMOD){
+      STATE.helical.module_or_DP += change;
+    } else if(STATE.helical.current_helical_mode == HelicalGears::HELICAL_ANGLE){
+      STATE.helical.helixDeg += change;
     }
   }
 }

@@ -12,6 +12,9 @@ void displayCurrentModePage(){
     case ROTARY_TABLE:
       displayRotaryTable();
       break;
+    case HELICAL:
+      displayHelicalGears();
+      break;
   }
   
 }
@@ -142,6 +145,76 @@ void displayRotaryTable(){
   u8g2.sendBuffer();
 }
 
+void displayHelicalGears(){
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+
+  switch(STATE.helical.current_helical_mode){
+    case HelicalGears::HELICAL_UNITS:
+      u8g2.drawHLine(0 ,37 , 10);
+      break;
+    case HelicalGears::HELICAL_TEETH:
+      u8g2.drawHLine(30 ,37 , 10);
+      break;
+    case HelicalGears::HELICAL_DPMOD:
+      u8g2.drawHLine(65 ,37 , 10);
+      break;
+    case HelicalGears::HELICAL_ANGLE:
+      u8g2.drawHLine(100 ,37 , 10);
+      break;
+  }
+
+  String header = "Helical Gears";
+
+  u8g2.drawStr(0, 10, header.c_str());
+
+  //u8g2.drawStr(0, 25, String(num_divisions).c_str());
+
+  u8g2.setFont(u8g2_font_profont10_mf);
+
+  String units = "IN/MM";
+  u8g2.drawStr(0, 25, units.c_str());
+
+  String current_mode = "IN";
+
+  if(STATE.helical.metric){
+    current_mode = "MM";
+  }
+  u8g2.drawStr(0, 35, current_mode.c_str());
+
+  String teeth = "Teeth";
+  u8g2.drawStr(30, 25, teeth.c_str());
+
+  u8g2.drawStr(30, 35, String(STATE.helical.teeth).c_str());
+  
+  String pitch = "DP";
+
+  if(STATE.helical.metric){
+    pitch = "MOD";
+  }
+
+  u8g2.drawStr(65, 25, pitch.c_str());
+
+  u8g2.drawStr(65, 35, String(STATE.helical.module_or_DP).c_str());
+
+  String angle = "Ang";
+  u8g2.drawStr(100, 25, angle.c_str());
+
+  u8g2.drawStr(100, 35, String(STATE.helical.helixDeg).c_str());
+
+  String stepNum = "Current Step:";
+
+  u8g2.drawStr(0, 55, String(stepNum).c_str());
+
+  u8g2.drawStr(80, 55, (String(STATE.helical.currentRunStep) + "/" + String(STATE.helical.teeth)).c_str());
+
+  if(STATE.helical.finished_move){
+    u8g2.drawStr(0, 60, String("Indexing Finished!").c_str());
+  }
+
+  u8g2.sendBuffer();
+}
+
 
 void displayBacklashAdjust(){
   u8g2.clearBuffer();
@@ -157,4 +230,17 @@ void displayBacklashAdjust(){
   u8g2.drawStr(0, 25, String(STATE.backlash.backlash_steps).c_str());
 
   u8g2.sendBuffer();
+}
+
+void displayEncoderTest(){
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+
+  int64_t cur_count = encoder.getCount();
+
+  u8g2.drawStr(0, 10, String((int)cur_count).c_str());
+
+  u8g2.sendBuffer();
+  Serial.println(cur_count);
+
 }

@@ -33,19 +33,36 @@ struct RotaryTable{
 };
 struct BacklashAdjust { 
   int backlash_steps = 0;
+  int last_step_direction = 0;
 };
-struct HelicalState {
-  float setpoint=0, measured=0; 
-  };
-struct AdvBState { uint32_t jobsQueued=0, jobsDone=0; };
+struct HelicalGears {
+    // DRO scale
+  double droCountsPerUnit = 25400.0; // e.g., counts per inch (or per mm if metric)
+
+  // Work spindle drive
+  double stepsPerRev = 10000*40; // motor steps * microsteps * gearing to spindle
+
+  // Gear geometry input
+  bool   metric = false;     // true = metric (module), false = imperial (DP)
+  int    teeth = 40;         // z
+  int module_or_DP = 16;  // if metric==true -> module m; else -> DP
+  int leadUnits = 0.0;    // linear travel per 1 rev (same units as droCountsPerUnit)
+  int helixDeg = 20.0;    // β at reference diameter
+  int currentRunStep = 0;
+
+  enum helical_adjust_mode : int { HELICAL_UNITS, HELICAL_TEETH, HELICAL_DPMOD, HELICAL_ANGLE};
+  helical_adjust_mode current_helical_mode = HELICAL_UNITS;
+
+  boolean finished_move = false;
+
+};
 
 struct AppState {
   Common common;
   Mode mode = SIMPLE;
   SimpleState simple;
   RotaryTable rotary;
-  HelicalState   helical;
-  AdvBState   advB;
+  HelicalGears   helical;
   BacklashAdjust backlash;
 };
 

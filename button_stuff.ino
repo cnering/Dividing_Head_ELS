@@ -29,6 +29,7 @@ void up_arrow_tap(Button2& btn) {
     case BACKLASH_ADJUST: changeBacklash(1); break;
     case SIMPLE:          changeDigit(1,SIMPLE);  break;
     case ROTARY_TABLE:    changeDigit(1,ROTARY_TABLE); break;
+    case HELICAL:         changeDigit(1,HELICAL); break;
   }
 }
 void down_arrow_tap(Button2& btn) {
@@ -36,6 +37,7 @@ void down_arrow_tap(Button2& btn) {
     case BACKLASH_ADJUST: changeBacklash(-1); break;
     case SIMPLE:          changeDigit(-1,SIMPLE); break;
     case ROTARY_TABLE:    changeDigit(-1,ROTARY_TABLE); break;
+    case HELICAL:         changeDigit(-1,HELICAL); break;
   }
 }
 
@@ -45,6 +47,7 @@ void center_arrow_tap(Button2& btn) {
     case BACKLASH_ADJUST: acceptBacklash(); break;
     case SIMPLE:          return; break;
     case ROTARY_TABLE:    STATE.rotary.current_adjust_mode = static_cast<RotaryTable::rotary_adjust_mode>((STATE.rotary.current_adjust_mode + 1) % 3); break;
+    case HELICAL:    STATE.helical.current_helical_mode = static_cast<HelicalGears::helical_adjust_mode>((STATE.helical.current_helical_mode + 1) % 4); break;
   }
   Serial.println(STATE.mode);
 }
