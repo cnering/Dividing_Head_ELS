@@ -22,9 +22,13 @@ struct RotaryTable{
   int num_degrees_hundreds = 0;
   int degrees_current_place = 1;
   int current_run_step = 0;
-  int current_speed_IPM = 1;
-  enum rotary_adjust_mode : int { ROTARY_DEGREES, ROTARY_SPEED };
+  int current_speed_degrees_per_second = 1;
+  int rotary_direction = 1;
+  enum rotary_adjust_mode : int { ROTARY_DEGREES, ROTARY_SPEED, ROTARY_MODE};
+  enum rotary_start_mode : int { CNTR, CW, CCW};
   rotary_adjust_mode current_adjust_mode = ROTARY_DEGREES;
+  rotary_start_mode current_start_mode = CNTR;
+  boolean initial_move = true;
   boolean finished_move = false;
 };
 struct BacklashAdjust { 

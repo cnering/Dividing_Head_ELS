@@ -23,60 +23,7 @@ U8G2_SSD1309_128X64_NONAME2_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
 Button2 button_up_arrow, button_down_arrow, button_left_arrow, button_right_arrow, button_center_arrow, button_mode, button_ok, button_cancel;
 
-void left_arrow_tap(Button2& btn) {
-  switch (STATE.mode){
-    case SIMPLE:          STATE.simple.divisions_current_place++;  break;
-  }
-  test_encoder = false;
-  
-}
-void right_arrow_tap(Button2& btn) {
-  switch (STATE.mode){
-    case SIMPLE:          STATE.simple.divisions_current_place--;  break;
-  }
-  test_encoder = true;
-}
-void up_arrow_tap(Button2& btn) {
-  switch (STATE.mode){
-    case BACKLASH_ADJUST: changeBacklash(1); break;
-    case SIMPLE:          changeDigit(1,SIMPLE);  break;
-    case ROTARY_TABLE:    changeDigit(1,ROTARY_TABLE); break;
-  }
-}
-void down_arrow_tap(Button2& btn) {
-  switch (STATE.mode){
-    case BACKLASH_ADJUST: changeBacklash(-1); break;
-    case SIMPLE:          changeDigit(-1,SIMPLE); break;
-    case ROTARY_TABLE:    changeDigit(-1,ROTARY_TABLE); break;
-  }
-}
 
-void center_arrow_tap(Button2& btn) {
-  switch (STATE.mode){
-    case BACKLASH_ADJUST: acceptBacklash(); break;
-    case SIMPLE:          return; break;
-    case ROTARY_TABLE:    rotaryChangeMode(); break;
-  }
-}
-void cancel_tap(Button2& btn) {
-  switch (STATE.mode){
-    case SIMPLE:            cancel_simple(); break;
-  }
-}
-void mode_tap(Button2& btn) {
-  STATE.mode = static_cast<Mode>((STATE.mode + 1) % MODE_COUNT);
-}
-void ok_tap(Button2& btn) {
-  switch (STATE.mode){
-    case SIMPLE:          advanceIndex(SIMPLE); break;
-    case ROTARY_TABLE:          advanceIndex(ROTARY_TABLE); break;
-  }
-}
-
-void cancel_simple(){
-  STATE.common.rotation_started = false; 
-  STATE.simple.current_run_step = 0;
-}
 
 volatile int32_t sim_speed = 20;    // counts per update
 int32_t max_speed = 500;           // max counts per update (adjust to taste)
@@ -159,25 +106,19 @@ int dir = 1;
 
 
 void loop() {
-  // put your main code here, to run repeatedly:
-
-  button_up_arrow.loop();
-  button_down_arrow.loop();
-  button_left_arrow.loop();
-  button_right_arrow.loop();
-  button_center_arrow.loop();
-  button_mode.loop();
-  button_ok.loop();
-  button_cancel.loop();
-
+  executeButtonLoops();
   displayCurrentModePage();
   encoderTester();
+}
 
+void cancel_simple(){
+  STATE.common.rotation_started = false; 
+  STATE.simple.current_run_step = 0;
 }
 
 void encoderTester(){
   uint64_t cur_steps = encoder.getCount();
-  Serial.println(cur_steps);
+  //Serial.println(cur_steps);
   if(last_encoder_counts != cur_steps){
     stepper->move(cur_steps - last_encoder_counts);
     last_encoder_counts = cur_steps;
@@ -218,77 +159,6 @@ void simulateManualMotion(void *param) {
   }
 }
 
-void displayCurrentModePage(){
-  switch (STATE.mode){
-    case BACKLASH_ADJUST:
-      displayBacklashAdjust();
-      break;
-    case SIMPLE:
-      displaySimpleDivisions();
-      break;
-    case ENCODER_TEST:
-      displayEncoderTest();
-      break;
-    case ROTARY_TABLE:
-      displayRotaryTable();
-      break;
-  }
-  
-}
-
-void displayRotaryTable(){
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB08_tr);
-
-  // pick your X offset (here 0) and Y positions for each line
-
-  String header = "Rotary Table";
-
-  u8g2.drawStr(0, 10, header.c_str());
-
-  //u8g2.drawStr(0, 25, String(num_divisions).c_str());
-
-  u8g2.setFont(u8g2_font_profont10_mf);
-
-  String instructions = "Degrees:";
-
-  u8g2.drawStr(0, 25, instructions.c_str());
-
-  String formatted_degrees = "";
-
-  String moveSign = "+";
-  if(STATE.rotary.num_degrees < 0){
-    moveSign = "-";
-  }
-
-  int absDegrees = abs(STATE.rotary.num_degrees);
-
-  if(absDegrees < 10){
-    formatted_degrees = moveSign + "00" + String(absDegrees);
-  } else if(abs(STATE.rotary.num_degrees) < 100){
-    formatted_degrees = moveSign + "0" + String(absDegrees);
-  } else{
-    formatted_degrees = moveSign + String(absDegrees);
-  }
-  u8g2.drawStr(0, 35, formatted_degrees.c_str());
-  
-  //u8g2.drawStr(5 * (3 - STATE.rotary.degrees_current_place) ,42 , "_");
-  u8g2.drawHLine(5 * (4 - STATE.rotary.degrees_current_place) ,37 , 4);
-
-  String status = "Speed";
-
-
-  u8g2.drawStr(60, 25, String(status).c_str());
-
-  u8g2.drawStr(60, 35, (String(STATE.rotary.current_speed_IPM)  + " IPM").c_str());
-  
-  if(STATE.rotary.finished_move){
-    u8g2.drawStr(0, 60, String("Indexing Finished!").c_str());
-  }
-
-  u8g2.sendBuffer();
-}
-
 void displayEncoderTest(){
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB08_tr);
@@ -300,67 +170,6 @@ void displayEncoderTest(){
   u8g2.sendBuffer();
   Serial.println(cur_count);
 
-}
-
-void displaySimpleDivisions(){
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB08_tr);
-
-  // pick your X offset (here 0) and Y positions for each line
-
-  String header = "Simple Indexing";
-
-  u8g2.drawStr(0, 10, header.c_str());
-
-  //u8g2.drawStr(0, 25, String(num_divisions).c_str());
-
-  u8g2.setFont(u8g2_font_profont10_mf);
-
-  String instructions = "# Divs:";
-
-  u8g2.drawStr(0, 25, instructions.c_str());
-
-  String formatted_divisions = "";
-
-  if(STATE.simple.num_divisions < 10){
-    formatted_divisions = "00" + String(STATE.simple.num_divisions);
-  } else if(STATE.simple.num_divisions < 100){
-    formatted_divisions = "0" + String(STATE.simple.num_divisions);
-  } else{
-    formatted_divisions = String(STATE.simple.num_divisions);
-  }
-  u8g2.drawStr(0, 35, formatted_divisions.c_str());
-  
-  //u8g2.drawStr(5 * (3 - STATE.simple.divisions_current_place) ,42 , "_");
-  u8g2.drawHLine(5 * (3 - STATE.simple.divisions_current_place) ,37 , 4);
-
-  String status = "Cur Step:";
-
-  u8g2.drawStr(60, 25, String(status).c_str());
-
-  u8g2.drawStr(60, 35, (String(STATE.simple.current_run_step) + "/" + String(STATE.simple.num_divisions)).c_str());
-  
-  if(STATE.simple.finished_move){
-    u8g2.drawStr(0, 60, String("Indexing Finished!").c_str());
-  }
-
-  u8g2.sendBuffer();
-}
-
-void displayBacklashAdjust(){
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB08_tr);
-
-  // pick your X offset (here 0) and Y positions for each line
-
-  String header = "Backlash Adjust";
-
-  u8g2.drawStr(0, 10, header.c_str());
-
-  
-  u8g2.drawStr(0, 25, String(STATE.backlash.backlash_steps).c_str());
-
-  u8g2.sendBuffer();
 }
 
 void advanceIndex(int enumValue) {
@@ -378,7 +187,39 @@ void advanceIndex(int enumValue) {
       STATE.simple.finished_move = true;
     }
   } else if(enumValue == ROTARY_TABLE){
-
+    float total_degrees = STATE.rotary.num_degrees;
+    float fraction_of_circle = total_degrees/360.0;
+    float speed = STATE.rotary.current_speed_degrees_per_second;
+    int total_steps_to_move = (400000)*fraction_of_circle;
+    int calculated_speed_steps_per_second = (speed/360.0) * 400000;
+    stepper->setSpeedInHz(calculated_speed_steps_per_second);
+    switch(STATE.rotary.current_start_mode){
+      case  RotaryTable::CNTR:
+        if(STATE.rotary.initial_move){
+          stepper->move((total_steps_to_move/2) * STATE.rotary.rotary_direction);
+          STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
+          STATE.rotary.initial_move = false;
+        } else{
+          stepper->move((total_steps_to_move) * STATE.rotary.rotary_direction);
+          STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
+        }
+      break;
+      case RotaryTable::CW:
+        if(STATE.rotary.initial_move){
+          STATE.rotary.rotary_direction = -1;
+          STATE.rotary.initial_move = false;
+        }
+        stepper->move((total_steps_to_move) * STATE.rotary.rotary_direction);
+        STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
+      break;
+      case RotaryTable::CCW:
+        if(STATE.rotary.initial_move){
+          STATE.rotary.rotary_direction = 1;
+          STATE.rotary.initial_move = false;
+        }
+        stepper->move((total_steps_to_move) * STATE.rotary.rotary_direction);
+        STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
+    }
   }
 }
 
@@ -430,18 +271,11 @@ void changeDigit(int change, int enumItem){
               break;
           }
         STATE.rotary.num_degrees = 100 * STATE.rotary.num_degrees_hundreds + 10 * STATE.rotary.num_degrees_tens + STATE.rotary.num_degrees_ones;
-    } else{
-      Serial.println("hmm");
-      STATE.rotary.current_speed_IPM += change;
+    } else if(STATE.rotary.current_adjust_mode == RotaryTable::ROTARY_SPEED){
+      STATE.rotary.current_speed_degrees_per_second += change;
+    } else if(STATE.rotary.current_adjust_mode == RotaryTable::ROTARY_MODE){
+      STATE.rotary.current_start_mode = static_cast<RotaryTable::rotary_start_mode>((STATE.rotary.current_start_mode + 1*change) % 3);
     }
-  }
-}
-void rotaryChangeMode(){
-  Serial.println(STATE.rotary.current_adjust_mode);
-  if(STATE.rotary.current_adjust_mode == RotaryTable::ROTARY_DEGREES){
-    STATE.rotary.current_adjust_mode = RotaryTable::ROTARY_SPEED;
-  } else{
-    STATE.rotary.current_adjust_mode = RotaryTable::ROTARY_DEGREES;
   }
 }
 
