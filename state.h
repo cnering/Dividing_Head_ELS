@@ -1,10 +1,10 @@
 #pragma once
 #include <Arduino.h>
 
-enum Mode : uint8_t { SIMPLE, ROTARY_TABLE, BACKLASH_ADJUST, HELICAL, ENCODER_TEST };
+enum Mode : uint8_t { SIMPLE, ROTARY_TABLE, HELICAL, BACKLASH_ADJUST, ENCODER_TEST };
 
 struct Common { 
-  boolean rotation_started = false; 
+  boolean rotation_started = false;
 };
 struct SimpleState { 
   int num_divisions = 1;
@@ -14,6 +14,7 @@ struct SimpleState {
   int divisions_current_place = 1;
   int current_run_step = 0;
   boolean finished_move = false;
+  boolean started_move = false;
 };
 struct RotaryTable{
   int num_degrees = 0;
@@ -36,6 +37,8 @@ struct BacklashAdjust {
   int last_step_direction = 0;
 };
 struct HelicalGears {
+
+  int64_t last_encoder_count = 0;
     // DRO scale
   double droCountsPerUnit = 25400.0; // e.g., counts per inch (or per mm if metric)
 
@@ -54,6 +57,7 @@ struct HelicalGears {
   helical_adjust_mode current_helical_mode = HELICAL_UNITS;
 
   boolean finished_move = false;
+  boolean rotation_started = false;
 
 };
 

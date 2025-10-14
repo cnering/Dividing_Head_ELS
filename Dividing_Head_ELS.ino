@@ -97,7 +97,7 @@ void setup() {
   u8g2.begin();
 
   xTaskCreatePinnedToCore(
-    simulateManualMotion, "simMotion", 4096, NULL, 1, NULL, 1
+    encoderReader, "encoderReader", 4096, NULL, 1, NULL, 1
   );
 
 }
@@ -115,6 +115,7 @@ void loop() {
 void cancel_simple(){
   STATE.common.rotation_started = false; 
   STATE.simple.current_run_step = 0;
+  STATE.simple.finished_move = false;
 }
 
 void encoderTester(){
@@ -126,39 +127,27 @@ void encoderTester(){
   }
 }
 
-void simulateManualMotion(void *param) {
-  bool direction = true;  // true = forward, false = backward
-
-  while (true) {
-    //Serial.println("hello");
-    if(test_encoder){
-      unsigned long now = millis();
-
-      // Occasionally change speed and direction
-      if (now - lastSpeedChange > speedChangeInterval) {
-        lastSpeedChange = now;
-        // Random new speed (human-like, slower more often)
-        sim_speed = random(0, max_speed);
-        // Occasionally go backwards
-        if (random(0, 100) < 20) direction = !direction;
-        // Occasionally STOP completely
-        if (random(0, 100) < 10) sim_speed = 0;
+void encoderReader(void *param) {
+  for(;;){
+    if(STATE.mode == HELICAL){
+      /*only listen to the encoder in helical mode, otherwise you can just ignore it*/
+      int64_t cur_count = encoder.getCount();
+      int counts_delta = cur_count - STATE.helical.last_encoder_count;
+      STATE.helical.last_encoder_count = cur_count;
+      if(counts_delta != 0){
+        //the encoder has count deltas AND we are in the right mode, time to move by the amount that we're supposed to
+        int steps_to_turn = stepsToTurn(counts_delta);
+        move_auto_backlast(steps_to_turn);
       }
-
-      // Apply motion
-      int32_t current = encoder.getCount();
-      if (direction)
-        current += sim_speed;
-      else
-        current -= sim_speed;
-      
-      encoder.setCount(current);
-
-      // Update rate controls smoothness
     }
-    vTaskDelay(pdMS_TO_TICKS(20)); // 50 Hz updates
   }
 }
+
+int stepsToTurn(encoder_counts_delta){
+  
+  return 0;
+}
+
 void advanceIndex(int enumValue) {
   if(enumValue == SIMPLE){
     if(!STATE.common.rotation_started){
@@ -205,6 +194,18 @@ void advanceIndex(int enumValue) {
         }
         move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction);
         STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
+    }
+  } else if(enumValue == HELICAL){
+    if(!STATE.helical.rotation_started){
+      STATE.helical.rotation_started = true;
+    }
+    if(STATE.helical.currentRunStep < STATE.helical.teeth){
+      STATE.helical.currentRunStep++;
+      /*long steps_to_move = ((1.0/STATE.simple.num_divisions) * 40.0)*10000.0;
+      move_auto_backlash(steps_to_move);*/
+    }
+    if(STATE.helical.currentRunStep == STATE.helical.teeth){
+      STATE.helical.finished_move = true;
     }
   }
 }

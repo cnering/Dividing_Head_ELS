@@ -57,9 +57,16 @@ void displaySimpleDivisions(){
 
   u8g2.drawStr(60, 35, (String(STATE.simple.current_run_step) + "/" + String(STATE.simple.num_divisions)).c_str());
   
-  if(STATE.simple.finished_move){
-    u8g2.drawStr(0, 60, String("Indexing Finished!").c_str());
+  String status_string = "";
+  if(STATE.simple.current_run_step > 0){
+    status_string = "Indexing In Progress!";
+    if(STATE.simple.finished_move){
+      status_string = "Indexing Finished!";
+    }
+  } else{
+    status_string = "Indexing Not Started";
   }
+  u8g2.drawStr(0, 60, status_string.c_str());
 
   u8g2.sendBuffer();
 }
@@ -204,13 +211,20 @@ void displayHelicalGears(){
 
   String stepNum = "Current Step:";
 
-  u8g2.drawStr(0, 55, String(stepNum).c_str());
+  u8g2.drawStr(0, 48, String(stepNum).c_str());
 
-  u8g2.drawStr(80, 55, (String(STATE.helical.currentRunStep) + "/" + String(STATE.helical.teeth)).c_str());
+  u8g2.drawStr(80, 48, (String(STATE.helical.currentRunStep) + "/" + String(STATE.helical.teeth)).c_str());
 
-  if(STATE.helical.finished_move){
-    u8g2.drawStr(0, 60, String("Indexing Finished!").c_str());
+  String status_string = "";
+  if(STATE.helical.currentRunStep > 0){
+    status_string = "Indexing In Progress!";
+    if(STATE.helical.finished_move){
+      status_string = "Indexing Finished!";
+    }
+  } else{
+    status_string = "Indexing Not Started";
   }
+  u8g2.drawStr(0, 60, status_string.c_str());
 
   u8g2.sendBuffer();
 }

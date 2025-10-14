@@ -63,6 +63,7 @@ void ok_tap(Button2& btn) {
   switch (STATE.mode){
     case SIMPLE:          advanceIndex(SIMPLE); break;
     case ROTARY_TABLE:          advanceIndex(ROTARY_TABLE); break;
+    case HELICAL:          advanceIndex(HELICAL); break;
   }
 }
 
