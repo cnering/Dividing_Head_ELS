@@ -13,6 +13,7 @@ void left_arrow_tap(Button2& btn) {
   switch (STATE.mode){
     case SIMPLE:          STATE.simple.divisions_current_place++;  break;
     case ROTARY_TABLE:          STATE.rotary.degrees_current_place++;  break;
+    case BACKLASH_ADJUST: move_auto_backlash(-200,SKIP_BACKLASH); break;
   }
   test_encoder = false;
   
@@ -21,6 +22,7 @@ void right_arrow_tap(Button2& btn) {
   switch (STATE.mode){
     case SIMPLE:          STATE.simple.divisions_current_place--;  break;
     case ROTARY_TABLE:          STATE.rotary.degrees_current_place--;  break;
+    case BACKLASH_ADJUST: move_auto_backlash(200,SKIP_BACKLASH); break;
   }
   test_encoder = true;
 }

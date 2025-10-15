@@ -64,17 +64,7 @@ void setup() {
 
   encoder.attachFullQuad(ENCODER_PIN_A, ENCODER_PIN_B);
 
-    // Give PCNT a modest glitch filter (APB clock cycles). Tune 100–1000.
-  
-
-  // Ensure HW limits & software accumulator are initialized
-  encoder.clearCount();
-  encoder.setCount(500);
-  encoder.resumeCount();
-
-  
-
-  /*!!!STEPPER DRIVER!!!*/
+    /*!!!STEPPER DRIVER!!!*/
   engine.init();
   stepper = engine.stepperConnectToPin(STEPPER_STEP_PIN,DRIVER_RMT);
   if (stepper) {
@@ -97,7 +87,7 @@ void setup() {
   u8g2.begin();
 
   xTaskCreatePinnedToCore(
-    encoderReader, "encoderReader", 4096, NULL, 1, NULL, 1
+    encoderReader, "encoderReader", 4096, NULL, 1, NULL, 0
   );
 
 }
@@ -132,20 +122,93 @@ void encoderReader(void *param) {
     if(STATE.mode == HELICAL){
       /*only listen to the encoder in helical mode, otherwise you can just ignore it*/
       int64_t cur_count = encoder.getCount();
-      int counts_delta = cur_count - STATE.helical.last_encoder_count;
+      int64_t counts_delta = cur_count - STATE.helical.last_encoder_count;
       STATE.helical.last_encoder_count = cur_count;
       if(counts_delta != 0){
         //the encoder has count deltas AND we are in the right mode, time to move by the amount that we're supposed to
-        int steps_to_turn = stepsToTurn(counts_delta);
-        move_auto_backlast(steps_to_turn);
+        int32_t steps_to_turn = elsStepsFromDroDelta(counts_delta,STATE.helical.metric,STATE.helical.droCountsPerUnit,STATE.helical.stepsPerRev,STATE.helical.teeth,STATE.helical.module_or_DP,STATE.helical.helixDeg);
+        move_auto_backlash(steps_to_turn);
       }
     }
+    vTaskDelay(1);
   }
 }
 
-int stepsToTurn(encoder_counts_delta){
-  
-  return 0;
+int32_t elsStepsFromDroDelta(
+    int32_t droDeltaCounts,   // Δcounts since last call (from your DRO)
+    bool    metric,           // true = mm/module; false = inch/DP
+    double  droCountsPerUnit, // e.g. 25400.0 counts/in or 1000.0 counts/mm
+    double  stepsPerRev,      // motor steps * microsteps * gearing-to-spindle
+    int     teeth,            // gear tooth count z
+    double  module_or_DP,     // if metric: module m; else: diametral pitch DP
+    double  helixDeg         // helix angle β at pitch dia (constant helix)
+) {
+  // --- Static cache & accumulator (persists across calls) ---
+  struct Cache {
+    bool    valid = false;
+    bool    metric;
+    double  droCountsPerUnit;
+    double  stepsPerRev;
+    int     teeth;
+    double  module_or_DP;
+    double  helixDeg;
+    double  k_countsToSteps;  // steps per DRO count
+    double  fracAccum;        // leftover fractional steps
+  };
+  static Cache C;
+
+  // Recompute coefficient if first time or any parameter changed
+  bool needRecalc = !C.valid
+                 || C.metric          != metric
+                 || C.droCountsPerUnit!= droCountsPerUnit
+                 || C.stepsPerRev     != stepsPerRev
+                 || C.teeth           != teeth
+                 || C.module_or_DP    != module_or_DP
+                 || C.helixDeg        != helixDeg;
+
+  if (needRecalc) {
+    C.metric           = metric;
+    C.droCountsPerUnit = droCountsPerUnit;
+    C.stepsPerRev      = stepsPerRev;
+    C.teeth            = teeth;
+    C.module_or_DP     = module_or_DP;
+    C.helixDeg         = helixDeg;
+
+    // Pitch diameter in same linear units as droCountsPerUnit
+    double d;
+    if (metric) {
+      // d = m * z  (mm)
+      d = module_or_DP * (double)teeth;
+    } else {
+      // d = z / DP (inches)
+      d = (double)teeth / module_or_DP;
+    }
+
+    // Lead at pitch diameter: L = π * d * tan(β)
+    const double beta = helixDeg * (M_PI / 180.0);
+    double L = M_PI * d * tan(beta);
+    if (!(L > 0.0)) L = 1e-9; // guard against zero/invalid
+
+    // steps per unit of table travel
+    const double stepsPerUnit = stepsPerRev / L;
+
+    // steps per DRO count
+    C.k_countsToSteps = (stepsPerUnit) / droCountsPerUnit;
+
+    // Reset accumulator when params change
+    C.fracAccum = 0.0;
+    C.valid = true;
+  }
+
+  // Convert counts -> steps (with sign convention)
+  double stepsFloat = (double)droDeltaCounts * C.k_countsToSteps;
+  C.fracAccum += stepsFloat;
+
+  // Emit whole steps now; keep the remainder for later
+  int32_t wholeSteps = (int32_t)((C.fracAccum >= 0.0) ? floor(C.fracAccum) : ceil(C.fracAccum));
+  C.fracAccum -= (double)wholeSteps;
+
+  return wholeSteps; // >0 or <0; use to drive DIR+STEP
 }
 
 void advanceIndex(int enumValue) {
@@ -285,7 +348,7 @@ void move_auto_backlash(int steps, boolean override_backlash, boolean override_s
 
 void changeBacklash(int change){
   STATE.backlash.backlash_steps+= change;
-  move_auto_backlash(change);
+  move_auto_backlash(change,SKIP_BACKLASH);
 }
 
 void acceptBacklash(){

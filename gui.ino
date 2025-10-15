@@ -240,8 +240,11 @@ void displayBacklashAdjust(){
 
   u8g2.drawStr(0, 10, header.c_str());
 
+  String curback = "Current(Steps): ";
   
-  u8g2.drawStr(0, 25, String(STATE.backlash.backlash_steps).c_str());
+  u8g2.drawStr(0, 25, String(curback).c_str());
+
+  u8g2.drawStr(86, 25, String(STATE.backlash.backlash_steps).c_str());
 
   u8g2.sendBuffer();
 }

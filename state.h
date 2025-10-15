@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-enum Mode : uint8_t { SIMPLE, ROTARY_TABLE, HELICAL, BACKLASH_ADJUST, ENCODER_TEST };
+enum Mode : volatile uint8_t { SIMPLE, ROTARY_TABLE, HELICAL, BACKLASH_ADJUST, ENCODER_TEST };
 
 struct Common { 
   boolean rotation_started = false;
