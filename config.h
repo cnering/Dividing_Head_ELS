@@ -4,8 +4,8 @@
 #define BACKLASH_STEPS 500
 
 
-#define SPEED_IN_HZ 120000
-#define ACCELERATION 200000
+#define SPEED_IN_HZ 160000
+#define ACCELERATION 1000000
 
 
 #define OLED_SDA 18
@@ -28,3 +28,5 @@
 #define ENCODER_PIN_B 33
 
 #define SKIP_BACKLASH true
+
+#define HOLD_REPEAT_MS   = 30;   // how often to fire while held

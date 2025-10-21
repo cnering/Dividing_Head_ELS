@@ -38,15 +38,37 @@ void setup() {
 
   button_up_arrow.begin(BUTTON_UP_ARROW);
   button_up_arrow.setTapHandler(up_arrow_tap);
+  button_up_arrow.setClickHandler(up_arrow_click);
+  button_up_arrow.setPressedHandler(up_arrow_press);
+  button_up_arrow.setLongClickDetectedHandler(up_arrow_hold);
+  button_up_arrow.setReleasedHandler(up_arrow_release);
+  button_up_arrow.setLongClickTime(250);
+  button_up_arrow.setDebounceTime(5);
 
   button_down_arrow.begin(BUTTON_DOWN_ARROW);
   button_down_arrow.setTapHandler(down_arrow_tap);
+  button_down_arrow.setClickHandler(down_arrow_click);
+  button_down_arrow.setPressedHandler(down_arrow_press);
+  button_down_arrow.setLongClickDetectedHandler(down_arrow_hold);
+  button_down_arrow.setReleasedHandler(down_arrow_release);
+  button_down_arrow.setLongClickTime(250);
+  button_down_arrow.setDebounceTime(5);
 
   button_left_arrow.begin(BUTTON_LEFT_ARROW);
   button_left_arrow.setTapHandler(left_arrow_tap);
+  button_left_arrow.setPressedHandler(left_arrow_press);
+  button_left_arrow.setReleasedHandler(left_arrow_release);
+  button_left_arrow.setLongClickDetectedHandler(left_arrow_hold);
+  button_left_arrow.setLongClickTime(250);
+  button_left_arrow.setDebounceTime(5);
 
   button_right_arrow.begin(BUTTON_RIGHT_ARROW);
   button_right_arrow.setTapHandler(right_arrow_tap);
+  button_right_arrow.setPressedHandler(right_arrow_press);
+  button_right_arrow.setReleasedHandler(right_arrow_release);
+  button_right_arrow.setLongClickDetectedHandler(right_arrow_hold);
+  button_right_arrow.setLongClickTime(250);
+  button_right_arrow.setDebounceTime(5);
 
   button_center_arrow.begin(BUTTON_CENTER_ARROW);
   button_center_arrow.setTapHandler(center_arrow_tap);
@@ -90,6 +112,8 @@ void setup() {
     encoderReader, "encoderReader", 4096, NULL, 1, NULL, 0
   );
 
+  recalculateHelicalParameters();
+
 }
 
 int cur_speed = 0;
@@ -99,7 +123,50 @@ int dir = 1;
 void loop() {
   executeButtonLoops();
   displayCurrentModePage();
-  //encoderTester();
+
+  if(STATE.mode == HELICAL){
+    if (STATE.helical.hold_mode && button_up_arrow.isPressed()) {
+      uint32_t now = millis();
+      if (now >= STATE.helical.next_hold_tick) {
+        changeDigit(1,HELICAL);
+        STATE.helical.next_hold_tick = now + 80;
+      }
+    }
+    if (STATE.helical.hold_mode && button_down_arrow.isPressed()) {
+      uint32_t now = millis();
+      if (now >= STATE.helical.next_hold_tick) {
+        changeDigit(-1,HELICAL);
+        STATE.helical.next_hold_tick = now + 80;
+      }
+    }
+  }
+  if(STATE.mode == MANUAL){    
+    if(STATE.manual.isBeingHeld && button_left_arrow.isPressed()){
+      uint32_t now = millis();
+      if (now >= STATE.manual.next_hold_tick) {
+        STATE.manual.degrees_per_second--;
+        STATE.manual.next_hold_tick = now + 80;
+      }
+    }
+    if(STATE.manual.isBeingHeld && button_right_arrow.isPressed()){
+      uint32_t now = millis();
+      if (now >= STATE.manual.next_hold_tick) {
+        STATE.manual.degrees_per_second++;
+        STATE.manual.next_hold_tick = now + 80;
+      }
+    }
+    if (button_down_arrow.isPressed()) {
+        stepper->setSpeedInHz(400000.0*(STATE.manual.degrees_per_second/360.0));
+        stepper->moveByAcceleration(200000);
+    }
+    else if (button_up_arrow.isPressed()) {
+        stepper->setSpeedInHz(400000.0*(STATE.manual.degrees_per_second/360.0));
+        stepper->moveByAcceleration(-200000,true);
+    } else{
+      stepper->stopMove();
+    }
+  }
+
 }
 
 void cancel_simple(){
@@ -124,9 +191,10 @@ void encoderReader(void *param) {
       int64_t cur_count = encoder.getCount();
       int64_t counts_delta = cur_count - STATE.helical.last_encoder_count;
       STATE.helical.last_encoder_count = cur_count;
-      if(counts_delta != 0){
+      if(counts_delta != 0 && STATE.helical.currentRunStep > 0){
         //the encoder has count deltas AND we are in the right mode, time to move by the amount that we're supposed to
-        int32_t steps_to_turn = elsStepsFromDroDelta(counts_delta,STATE.helical.metric,STATE.helical.droCountsPerUnit,STATE.helical.stepsPerRev,STATE.helical.teeth,STATE.helical.module_or_DP,STATE.helical.helixDeg);
+        int32_t steps_to_turn = 0;
+        steps_to_turn = helicalStepsToMove(counts_delta, STATE.helical.metric);
         move_auto_backlash(steps_to_turn);
       }
     }
@@ -134,81 +202,21 @@ void encoderReader(void *param) {
   }
 }
 
-int32_t elsStepsFromDroDelta(
-    int32_t droDeltaCounts,   // Δcounts since last call (from your DRO)
-    bool    metric,           // true = mm/module; false = inch/DP
-    double  droCountsPerUnit, // e.g. 25400.0 counts/in or 1000.0 counts/mm
-    double  stepsPerRev,      // motor steps * microsteps * gearing-to-spindle
-    int     teeth,            // gear tooth count z
-    double  module_or_DP,     // if metric: module m; else: diametral pitch DP
-    double  helixDeg         // helix angle β at pitch dia (constant helix)
-) {
-  // --- Static cache & accumulator (persists across calls) ---
-  struct Cache {
-    bool    valid = false;
-    bool    metric;
-    double  droCountsPerUnit;
-    double  stepsPerRev;
-    int     teeth;
-    double  module_or_DP;
-    double  helixDeg;
-    double  k_countsToSteps;  // steps per DRO count
-    double  fracAccum;        // leftover fractional steps
-  };
-  static Cache C;
+int32_t helicalStepsToMove(int64_t counts_delta, bool metric){
+  double ratio = STATE.helical.steps_per_step * counts_delta;
+  int int_steps = int(ratio);
+  STATE.helical.overflow += ratio - (double)int_steps; 
 
-  // Recompute coefficient if first time or any parameter changed
-  bool needRecalc = !C.valid
-                 || C.metric          != metric
-                 || C.droCountsPerUnit!= droCountsPerUnit
-                 || C.stepsPerRev     != stepsPerRev
-                 || C.teeth           != teeth
-                 || C.module_or_DP    != module_or_DP
-                 || C.helixDeg        != helixDeg;
-
-  if (needRecalc) {
-    C.metric           = metric;
-    C.droCountsPerUnit = droCountsPerUnit;
-    C.stepsPerRev      = stepsPerRev;
-    C.teeth            = teeth;
-    C.module_or_DP     = module_or_DP;
-    C.helixDeg         = helixDeg;
-
-    // Pitch diameter in same linear units as droCountsPerUnit
-    double d;
-    if (metric) {
-      // d = m * z  (mm)
-      d = module_or_DP * (double)teeth;
-    } else {
-      // d = z / DP (inches)
-      d = (double)teeth / module_or_DP;
-    }
-
-    // Lead at pitch diameter: L = π * d * tan(β)
-    const double beta = helixDeg * (M_PI / 180.0);
-    double L = M_PI * d * tan(beta);
-    if (!(L > 0.0)) L = 1e-9; // guard against zero/invalid
-
-    // steps per unit of table travel
-    const double stepsPerUnit = stepsPerRev / L;
-
-    // steps per DRO count
-    C.k_countsToSteps = (stepsPerUnit) / droCountsPerUnit;
-
-    // Reset accumulator when params change
-    C.fracAccum = 0.0;
-    C.valid = true;
+  if(STATE.helical.overflow >= 1.0){
+    int overflow_steps = int(STATE.helical.overflow);
+    int_steps += overflow_steps;
+    STATE.helical.overflow -= int(STATE.helical.overflow);
   }
-
-  // Convert counts -> steps (with sign convention)
-  double stepsFloat = (double)droDeltaCounts * C.k_countsToSteps;
-  C.fracAccum += stepsFloat;
-
-  // Emit whole steps now; keep the remainder for later
-  int32_t wholeSteps = (int32_t)((C.fracAccum >= 0.0) ? floor(C.fracAccum) : ceil(C.fracAccum));
-  C.fracAccum -= (double)wholeSteps;
-
-  return wholeSteps; // >0 or <0; use to drive DIR+STEP
+    int handedness = 1;
+    if(STATE.helical.left_hand_teeth){
+      handedness = -1;
+    }
+    return int_steps * handedness; 
 }
 
 void advanceIndex(int enumValue) {
@@ -264,8 +272,8 @@ void advanceIndex(int enumValue) {
     }
     if(STATE.helical.currentRunStep < STATE.helical.teeth){
       STATE.helical.currentRunStep++;
-      /*long steps_to_move = ((1.0/STATE.simple.num_divisions) * 40.0)*10000.0;
-      move_auto_backlash(steps_to_move);*/
+      long steps_to_move = ((1.0/STATE.helical.teeth) * 40.0)*10000.0;
+      move_auto_backlash(steps_to_move);
     }
     if(STATE.helical.currentRunStep == STATE.helical.teeth){
       STATE.helical.finished_move = true;
@@ -346,9 +354,9 @@ void move_auto_backlash(int steps, boolean override_backlash, boolean override_s
 
 }
 
-void changeBacklash(int change){
+void changeBacklash(int change, bool skip_backlash){
   STATE.backlash.backlash_steps+= change;
-  move_auto_backlash(change,SKIP_BACKLASH);
+  move_auto_backlash(change,skip_backlash);
 }
 
 void acceptBacklash(){
@@ -397,14 +405,47 @@ void changeDigit(int change, int enumItem){
     }
   } else if (enumItem == HELICAL){
     if(STATE.helical.current_helical_mode == HelicalGears::HELICAL_UNITS){
-      STATE.helical.metric = !STATE.helical.metric;
+      //STATE.helical.metric = !STATE.helical.metric;
+      if(STATE.helical.current_helical_unit_mode + 1 == HelicalGears::HELICAL_UNITS_END){
+        STATE.helical.current_helical_unit_mode = HelicalGears::IN_N;
+      } else{
+        STATE.helical.current_helical_unit_mode = static_cast<HelicalGears::helical_units>((STATE.helical.current_helical_unit_mode + 1));
+      }
     } else if(STATE.helical.current_helical_mode == HelicalGears::HELICAL_TEETH){
       STATE.helical.teeth += change;
     } else if(STATE.helical.current_helical_mode == HelicalGears::HELICAL_DPMOD){
       STATE.helical.module_or_DP += change;
     } else if(STATE.helical.current_helical_mode == HelicalGears::HELICAL_ANGLE){
       STATE.helical.helixDeg += change;
+    } else if(STATE.helical.current_helical_mode == HelicalGears::HELICAL_HANDEDNESS){
+      STATE.helical.left_hand_teeth = !STATE.helical.left_hand_teeth;
     }
+    recalculateHelicalParameters();
   }
+}
+
+void recalculateHelicalParameters(){
+  /*recalculate helical params*/
+
+    double units_in_normal_module = 0;
+    switch (STATE.helical.current_helical_unit_mode){
+      case HelicalGears::IN_N:
+        units_in_normal_module = (25.4/STATE.helical.module_or_DP);
+        break;
+      case HelicalGears::IN_T:
+        units_in_normal_module = (25.4/STATE.helical.module_or_DP)/cos(STATE.helical.helixDeg * (M_PI / 180.0));
+        break;
+      case HelicalGears::MM_N:
+        units_in_normal_module = (STATE.helical.module_or_DP);
+        break;
+      case HelicalGears::MM_T:
+        units_in_normal_module = (STATE.helical.module_or_DP)/cos(STATE.helical.helixDeg * (M_PI / 180.0));
+        break;
+    }
+    STATE.helical.lead = (M_PI * units_in_normal_module * STATE.helical.teeth) / sin(STATE.helical.helixDeg * (M_PI / 180.0));
+    double counts_per_mm = 1000;
+    double counts_per_lead  = STATE.helical.lead * 1000;
+    STATE.helical.steps_per_step = 400000.0/counts_per_lead;
+
 }
 
