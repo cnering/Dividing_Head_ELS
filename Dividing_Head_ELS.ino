@@ -237,8 +237,7 @@ void advanceIndex(int enumValue) {
     float fraction_of_circle = total_degrees/360.0;
     float speed = STATE.rotary.current_speed_degrees_per_second;
     int total_steps_to_move = (400000)*fraction_of_circle;
-    int calculated_speed_steps_per_second = (speed/360.0) * 400000;
-    stepper->setSpeedInHz(calculated_speed_steps_per_second);
+    int calculated_speed_steps_per_second = (speed/360.0) * 400000.0;
     switch(STATE.rotary.current_start_mode){
       case  RotaryTable::CNTR:
         if(STATE.rotary.initial_move){
@@ -246,7 +245,7 @@ void advanceIndex(int enumValue) {
           STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
           STATE.rotary.initial_move = false;
         } else{
-          move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction);
+          move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction,false, true, calculated_speed_steps_per_second);
           STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
         }
       break;
@@ -255,7 +254,7 @@ void advanceIndex(int enumValue) {
           STATE.rotary.rotary_direction = -1;
           STATE.rotary.initial_move = false;
         }
-        move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction);
+        move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction,false, true, calculated_speed_steps_per_second);
         STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
       break;
       case RotaryTable::CCW:
@@ -263,7 +262,7 @@ void advanceIndex(int enumValue) {
           STATE.rotary.rotary_direction = 1;
           STATE.rotary.initial_move = false;
         }
-        move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction);
+        move_auto_backlash((total_steps_to_move) * STATE.rotary.rotary_direction,false, true, calculated_speed_steps_per_second);
         STATE.rotary.rotary_direction = STATE.rotary.rotary_direction * -1;
     }
   } else if(enumValue == HELICAL){
@@ -273,7 +272,11 @@ void advanceIndex(int enumValue) {
     if(STATE.helical.currentRunStep < STATE.helical.teeth){
       STATE.helical.currentRunStep++;
       long steps_to_move = ((1.0/STATE.helical.teeth) * 40.0)*10000.0;
-      move_auto_backlash(steps_to_move);
+      int handedness = 1;
+      if(STATE.helical.left_hand_teeth){
+        handedness = -1;
+      }
+      move_auto_backlash(steps_to_move*handedness);
     }
     if(STATE.helical.currentRunStep == STATE.helical.teeth){
       STATE.helical.finished_move = true;
@@ -344,13 +347,11 @@ void move_auto_backlash(int steps, boolean override_backlash, boolean override_s
   if(override_speed){ 
     stepper->setAcceleration(ACCELERATION);
     stepper->setSpeedInHz(speed_in_steps_per_second);
+  } else{
+    stepper->setAcceleration(ACCELERATION);
+    stepper->setSpeedInHz(SPEED_IN_HZ);
   }
-  Serial.println(final_move_amount);
   stepper->move(final_move_amount);
-  
-  /*Reset speed to defaults*/
-  stepper->setAcceleration(ACCELERATION);
-  stepper->setSpeedInHz(SPEED_IN_HZ);
 
 }
 

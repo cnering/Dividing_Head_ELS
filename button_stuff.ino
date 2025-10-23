@@ -154,6 +154,7 @@ void cancel_tap(Button2& btn) {
   switch (STATE.mode){
     case SIMPLE:            cancel_simple(); break;
     case HELICAL:            STATE.helical.currentRunStep = 0; break;
+    case ROTARY_TABLE:      stepper->stopMove();
   }
 }
 void mode_tap(Button2& btn) {
